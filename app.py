@@ -1,26 +1,46 @@
+import os
 import streamlit as st
 import pandas as pd
 import altair as alt
-import os
 
 # Constants
 data_dir = "uploads"
 skip_labels = {'4ee', '4em', '4mm'}
+display_map = {
+    '4e': '4e',
+    'e': 'ee',
+    'g': 'γγ',
+    '4m': '4μ',
+    'm': 'μμ',
+    '2e2m': '2e2μ'
+}
 
 # Ensure upload directory exists
 os.makedirs(data_dir, exist_ok=True)
 
-# Streamlit page setup
+# Streamlit setup
 st.set_page_config(page_title="Invariant Mass Event Plotter", layout="wide")
 st.title("Invariant Mass Event Plotter")
 
-# Sidebar: bin selection and axis bounds
-st.sidebar.header("Plot Settings")
+# Sidebar controls
 bin_options = [5, 10, 20, 50, 70, 100, 200, 400]
-bins = st.sidebar.selectbox("Number of bins", options=bin_options, index=bin_options.index(50))
+bins = st.sidebar.selectbox("Number of bins", bin_options, index=bin_options.index(50))
 
-# After all uploads, reload files from disk each time
+# File uploader
+def save_upload(uploaded_file):
+    with open(os.path.join(data_dir, uploaded_file.name), 'wb') as f:
+        f.write(uploaded_file.getbuffer())
 
+uploaded_files = st.file_uploader(
+    "Upload one or more text files (.txt)",
+    type=['txt'], accept_multiple_files=True
+)
+if uploaded_files:
+    for uf in uploaded_files:
+        save_upload(uf)
+        st.success(f"Saved {uf.name}")
+
+# Load datasets from disk
 def load_datasets():
     datasets = {}
     for fname in sorted(os.listdir(data_dir)):
@@ -29,9 +49,7 @@ def load_datasets():
         path = os.path.join(data_dir, fname)
         try:
             df = pd.read_csv(path, sep=r"\s+", header=None, names=['mass', 'event'])
-            if df.shape[1] != 2 or not pd.api.types.is_float_dtype(df['mass']):
-                continue
-            # process skip logic
+            # Skip logic
             mask = pd.Series(False, index=df.index)
             for idx, lbl in df['event'].items():
                 if lbl in skip_labels:
@@ -39,94 +57,122 @@ def load_datasets():
             df = df.loc[~mask]
             datasets[fname] = df
         except Exception:
-            # skip invalid
             continue
     return datasets
 
-# Handle new uploads
-def save_upload(uploaded_file):
-    # overwrite if same name
-    save_path = os.path.join(data_dir, uploaded_file.name)
-    with open(save_path, 'wb') as f:
-        f.write(uploaded_file.getbuffer())
-
-uploaded_files = st.file_uploader(
-    "Upload one or more text files with invariant mass data", 
-    type=['txt'], accept_multiple_files=True
-)
-if uploaded_files:
-    for uf in uploaded_files:
-        try:
-            save_upload(uf)
-            st.success(f"Saved {uf.name}")
-        except Exception as e:
-            st.error(f"Failed to save {uf.name}: {e}")
-
-# Load all stored datasets
 datasets = load_datasets()
 
-if datasets:
-    # global combined masses for bounds and filter defaults
-    all_events = sorted({e for df in datasets.values() for e in df['event'].unique()})
-    selected_events = st.sidebar.multiselect(
-        "Select event types to include", options=all_events, default=all_events
+if not datasets:
+    st.info("Please upload one or more text files to visualize invariant mass distributions.")
+    st.stop()
+
+# Event filter and axis bounds
+all_events = sorted({e for df in datasets.values() for e in df['event'].unique()})
+selected_events = st.sidebar.multiselect(
+    "Select event types to include", options=all_events, default=all_events,
+    format_func=lambda x: display_map.get(x, x)
+)
+all_masses = pd.concat([df[df['event'].isin(selected_events)]['mass'] for df in datasets.values()])
+min_val, max_val = int(all_masses.min()), int(all_masses.max())
+x_min = st.sidebar.number_input("X-axis lower bound", min_val, max_val, min_val)
+x_max = st.sidebar.number_input("X-axis upper bound", min_val, max_val, max_val)
+
+# Stats helper
+def stats_table(series: pd.Series) -> pd.DataFrame:
+    filtered = series[(series >= x_min) & (series <= x_max)]
+    return pd.DataFrame({
+        'Statistic': ['Count', 'Mean', 'Std', 'Min', 'Max'],
+        'Value': [
+            int(filtered.count()),
+            round(filtered.mean(), 3),
+            round(filtered.std(), 3),
+            round(filtered.min(), 3),
+            round(filtered.max(), 3)
+        ]
+    })
+
+# Plot individual histograms
+for name, df in datasets.items():
+    sel = df[df['event'].isin(selected_events)]['mass']
+    st.subheader(f"Histogram for {name}")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        show_counts = st.checkbox(f"Show bin counts for {name}", key=name)
+        base = alt.Chart(pd.DataFrame({'mass': sel})).encode(
+            alt.X('mass:Q', bin=alt.Bin(maxbins=bins), scale=alt.Scale(domain=[x_min, x_max]), title='Invariant Mass', axis=alt.Axis(grid=True, ticks=True)),
+            alt.Y('count()', title='Counts', axis=alt.Axis(grid=True))
+        )
+        chart = base.mark_bar(opacity=0.7, color='#1f77b4').interactive()
+        if show_counts:
+            text = base.mark_text(dy=-5, fontSize=10).encode(text='count()')
+            chart = chart + text
+        st.altair_chart(chart.properties(width=500, height=250), use_container_width=True)
+    with col2:
+        st.table(stats_table(sel))
+
+# Summed histogram
+summed = all_masses
+st.subheader("Summed Histogram of All Uploaded Files")
+col1, col2 = st.columns([3, 1])
+with col1:
+    show_sum = st.checkbox("Show bin counts for Summed", key="summed")
+    base = alt.Chart(pd.DataFrame({'mass': summed})).encode(
+        alt.X('mass:Q', bin=alt.Bin(maxbins=bins), scale=alt.Scale(domain=[x_min, x_max]), title='Invariant Mass', axis=alt.Axis(grid=True, ticks=True)),
+        alt.Y('count()', title='Counts', axis=alt.Axis(grid=True))
     )
+    chart = base.mark_bar(opacity=0.7, color='#d62728').interactive()
+    if show_sum:
+        text = base.mark_text(dy=-5, fontSize=10).encode(text='count()')
+        chart = chart + text
+    st.altair_chart(chart.properties(width=500, height=250), use_container_width=True)
+with col2:
+    st.table(stats_table(summed))
 
-    all_masses = pd.concat([df[df['event'].isin(selected_events)]['mass'] for df in datasets.values()])
-    global_min, global_max = float(all_masses.min()), float(all_masses.max())
-    x_min = st.sidebar.number_input("Lower bound", value=global_min)
-    x_max = st.sidebar.number_input("Upper bound", value=global_max)
 
-    # stats helper
-    def stats_table(series: pd.Series) -> pd.DataFrame:
-        return pd.DataFrame({
-            'Statistic': ['Count', 'Mean', 'Std', 'Min', 'Max'],
-            'Value': [
-                int(series.count()),
-                round(series.mean(), 3),
-                round(series.std(), 3),
-                round(series.min(), 3),
-                round(series.max(), 3)
-            ]
-        })
+# # 1. Interactive Sideband Selection Tool
+# Brush over the mass axis to define “signal” and “sideband” regions directly on the histogram.
 
-    # Individual
-    for name, df in datasets.items():
-        sel = df[df['event'].isin(selected_events)]['mass']
-        st.subheader(f"Histogram for {name}")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            chart = alt.Chart(pd.DataFrame({'mass': sel})).mark_bar(color='#1f77b4', opacity=0.7).encode(
-                alt.X('mass:Q', bin=alt.Bin(maxbins=bins), scale=alt.Scale(domain=[x_min, x_max]), title='Invariant Mass'),
-                alt.Y('count()', title='Counts')
-            ).properties(width=500, height=250, title=name).interactive()
-            st.altair_chart(chart, use_container_width=True)
-        with col2:
-            st.table(stats_table(sel))
+# Use those regions to compute and display a data-driven background estimate (e.g. by linear interpolation or polynomial fit between the sidebands).
 
-    # Summed
-    if len(datasets) > 1:
-        summed = all_masses
-        st.subheader("Summed Histogram of All Uploaded Files")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            chart_sum = alt.Chart(pd.DataFrame({'mass': summed})).mark_bar(color='#d62728', opacity=0.7).encode(
-                alt.X('mass:Q', bin=alt.Bin(maxbins=bins), scale=alt.Scale(domain=[x_min, x_max]), title='Invariant Mass'),
-                alt.Y('count()', title='Counts')
-            ).properties(width=500, height=250, title='Summed Invariant Mass').interactive()
-            st.altair_chart(chart_sum, use_container_width=True)
-        with col2:
-            st.table(stats_table(summed))
+# Show the fitted background curve overlaid on the histogram and report the estimated signal yield.
 
-        st.subheader("Interactive Summed Histogram (Zoomable)")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            chart_int = alt.Chart(pd.DataFrame({'mass': summed})).mark_bar(color='#2ca02c', opacity=0.7).encode(
-                alt.X('mass:Q', bin=alt.Bin(maxbins=bins), scale=alt.Scale(domain=[x_min, x_max]), title='Invariant Mass'),
-                alt.Y('count()', title='Counts')
-            ).properties(width=500, height=250, title='Interactive Summed Invariant Mass').interactive()
-            st.altair_chart(chart_int, use_container_width=True)
-        with col2:
-            st.table(stats_table(summed))
-else:
-    st.info("Please upload one or more text files (.txt) to visualize invariant mass distributions.")
+# 2. Parameter-Scanning “What-If” Panel
+# Let students adjust (via sliders) key parameters of the sideband method (e.g. choice of polynomial order, fraction of sideband width) and instantly see how the background estimate and signal yield change.
+
+# Display a small “sensitivity table” summarizing how the yield varies as they tweak settings.
+
+# 3. Overlay of “True” vs. “Estimated” Distributions
+# Provide an optional “toy MC” dataset or template analytic function so students can compare:
+
+# The true underlying distribution,
+
+# The observed data (their uploaded file),
+
+# Their background-subtracted signal.
+
+# Use different colors/line styles and a legend to make the comparison clear.
+
+# 4. Annotation and Reporting
+# After they finalize a fit/estimate, allow students to export a mini report (PDF or CSV) summarizing:
+
+# Chosen binning, sideband definitions, fit parameters, yields, and uncertainties.
+
+# Or simply generate a markdown snippet they can paste into their lab notebook.
+
+# 5. Step-by-Step Guided Mode
+# Add a toggle for a “guided exercise” that walks them through numbered steps in the sidebar (e.g. “1. Upload file”, “2. Select sidebands”, “3. Fit background”, “4. Compute yield”), showing context-sensitive tips or reminders at each stage.
+
+# 6. Peer Comparison Dashboard
+# Since everyone’s uploads are shared, include a little leaderboard or table that shows:
+
+# Who uploaded what file,
+
+# Their current signal‐to‐background ratio,
+
+# Their estimated yields (so students can compare strategies).
+
+# 7. Interactive Fitting Panel
+# Integrate an embedded least-squares fitter (e.g. via scipy.optimize) so they can choose a model (linear, exponential, polynomial) for the sideband and see fit residuals in real time.
+
+# 8. Visual “Quality Metrics”
+# Compute and display χ² / ndof or the Kolmogorov–Smirnov distance between the background model and data in the sidebands, so they can quantify goodness-of-fit.
