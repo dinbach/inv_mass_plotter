@@ -5,14 +5,15 @@ import altair as alt
 
 # Constants
 data_dir = "uploads"
-skip_labels = {'4ee', '4em', '4mm'}
+skip_labels = {'4ee', '4em', '4mm', '4me'}
 display_map = {
     '4e': '4e',
     'e': 'ee',
     'g': 'γγ',
     '4m': '4μ',
     'm': 'μμ',
-    '2e2m': '2e2μ'
+    '4em': '2e2μ',
+    '4me': '2μ2e'
 }
 
 # Ensure upload directory exists
@@ -20,11 +21,11 @@ os.makedirs(data_dir, exist_ok=True)
 
 # Streamlit setup
 st.set_page_config(page_title="Invariant Mass Event Plotter", layout="wide")
-st.title("Invariant Mass Event Plotter")
+st.title("Ιστογράμματα Αναλλοίωτης Μάζας")
 
 # Sidebar controls
 bin_options = [5, 10, 20, 50, 70, 100, 200, 400]
-bins = st.sidebar.selectbox("Number of bins", bin_options, index=bin_options.index(50))
+bins = st.sidebar.selectbox("Αριθμός bins", bin_options, index=bin_options.index(50))
 
 # File uploader
 def save_upload(uploaded_file):
@@ -32,7 +33,7 @@ def save_upload(uploaded_file):
         f.write(uploaded_file.getbuffer())
 
 uploaded_files = st.file_uploader(
-    "Upload one or more text files (.txt)",
+    "Ανεβάστε ένα ή περισσότερα αρχεία (.txt)",
     type=['txt'], accept_multiple_files=True
 )
 if uploaded_files:
@@ -63,44 +64,48 @@ def load_datasets():
 datasets = load_datasets()
 
 if not datasets:
-    st.info("Please upload one or more text files to visualize invariant mass distributions.")
+    st.info("Παρακαλώ ανεβάστε ένα ή περισσότερα αρχεία .txt από το πρόγραμμα HYPATIA για οπτικοποίηση της αναλλοίωτης μάζας.")
     st.stop()
 
 # Event filter and axis bounds
 all_events = sorted({e for df in datasets.values() for e in df['event'].unique()})
 selected_events = st.sidebar.multiselect(
-    "Select event types to include", options=all_events, default=all_events,
+    "Επιλογή τύπου τελικής κατάστασης", options=all_events, default=all_events,
     format_func=lambda x: display_map.get(x, x)
 )
 all_masses = pd.concat([df[df['event'].isin(selected_events)]['mass'] for df in datasets.values()])
-min_val, max_val = int(all_masses.min()), int(all_masses.max())
-x_min = st.sidebar.number_input("X-axis lower bound", min_val, max_val, min_val)
-x_max = st.sidebar.number_input("X-axis upper bound", min_val, max_val, max_val)
+if all_masses.empty:
+    st.info("Δεν υπάρχουν γεγονότα για τα επιλεγμένα είδη τελικής κατάστασης.")
+    st.stop()
+min_val, max_val = int(all_masses.min() - 100), int(all_masses.max() +100)
+# min_val, max_val = 0, 2000
+x_min = st.sidebar.number_input("Κατώτερο όριο X-άξονα", min_val, max_val, min_val)
+x_max = st.sidebar.number_input("Ανώτερο όριο X-άξονα", min_val, max_val, max_val)
 
-# Stats helper
+# Stats helper, display only 1 decimal place
 def stats_table(series: pd.Series) -> pd.DataFrame:
     filtered = series[(series >= x_min) & (series <= x_max)]
     return pd.DataFrame({
         'Statistic': ['Count', 'Mean', 'Std', 'Min', 'Max'],
         'Value': [
             int(filtered.count()),
-            round(filtered.mean(), 3),
-            round(filtered.std(), 3),
-            round(filtered.min(), 3),
-            round(filtered.max(), 3)
+            f"{filtered.mean():.1f}",
+            f"{filtered.std():.1f}",
+            f"{filtered.min():.1f}",
+            f"{filtered.max():.1f}"
         ]
     })
 
 # Plot individual histograms
 for name, df in datasets.items():
     sel = df[df['event'].isin(selected_events)]['mass']
-    st.subheader(f"Histogram for {name}")
+    st.subheader(f"Ιστόγραμμα από {name}")
     col1, col2 = st.columns([3, 1])
     with col1:
         show_counts = st.checkbox(f"Show bin counts for {name}", key=name)
         base = alt.Chart(pd.DataFrame({'mass': sel})).encode(
             alt.X('mass:Q', bin=alt.Bin(maxbins=bins), scale=alt.Scale(domain=[x_min, x_max]), title='Invariant Mass', axis=alt.Axis(grid=True, ticks=True)),
-            alt.Y('count()', title='Counts', axis=alt.Axis(grid=True))
+            alt.Y('count()', title='Αριθμός Γεγονότων', axis=alt.Axis(grid=True))
         )
         chart = base.mark_bar(opacity=0.7, color='#1f77b4').interactive()
         if show_counts:
@@ -112,13 +117,13 @@ for name, df in datasets.items():
 
 # Summed histogram
 summed = all_masses
-st.subheader("Summed Histogram of All Uploaded Files")
+st.subheader("Συνολικό ιστόγραμμα από όλα τα αρχεία")
 col1, col2 = st.columns([3, 1])
 with col1:
     show_sum = st.checkbox("Show bin counts for Summed", key="summed")
     base = alt.Chart(pd.DataFrame({'mass': summed})).encode(
         alt.X('mass:Q', bin=alt.Bin(maxbins=bins), scale=alt.Scale(domain=[x_min, x_max]), title='Invariant Mass', axis=alt.Axis(grid=True, ticks=True)),
-        alt.Y('count()', title='Counts', axis=alt.Axis(grid=True))
+        alt.Y('count()', title='Αριθμός Γεγονότων', axis=alt.Axis(grid=True))
     )
     chart = base.mark_bar(opacity=0.7, color='#d62728').interactive()
     if show_sum:
@@ -174,5 +179,5 @@ with col2:
 # 7. Interactive Fitting Panel
 # Integrate an embedded least-squares fitter (e.g. via scipy.optimize) so they can choose a model (linear, exponential, polynomial) for the sideband and see fit residuals in real time.
 
-# 8. Visual “Quality Metrics”
+# 8. Visual “Quality Metrics”   
 # Compute and display χ² / ndof or the Kolmogorov–Smirnov distance between the background model and data in the sidebands, so they can quantify goodness-of-fit.
