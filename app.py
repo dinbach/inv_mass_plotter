@@ -150,14 +150,14 @@ display_map = {
     'm': 'μμ',
     '2e2m': '2e2μ'
 }
-bin_options = [5, 10, 20, 50, 70, 100, 200, 400]
+bin_options = [5, 10, 20, 50, 70, 100, 200, 400, 500]
 
 # Ensure upload directory exists
 os.makedirs(data_dir, exist_ok=True)
 
 # Streamlit setup
 st.set_page_config(page_title="Invariant Mass Event Plotter", layout="wide")
-st.title("Invariant Mass Event Plotter")
+st.title("Ιστογράμματα Αναλλοίωτης Μάζας")
 
 # File uploader in sidebar
 def save_upload(uploaded_file):
@@ -166,7 +166,7 @@ def save_upload(uploaded_file):
         f.write(uploaded_file.getbuffer())
 
 uploaded_files = st.sidebar.file_uploader(
-    "Upload text files (.txt)",
+    "Ανεβάστε ένα ή περισσότερα αρχεία (.txt)",
     type=['txt'],
     accept_multiple_files=True
 )
@@ -192,13 +192,13 @@ def load_datasets():
 
 datasets = load_datasets()
 if not datasets:
-    st.info("Please upload one or more text files to begin.")
+    st.info("Παρακαλώ ανεβάστε ένα ή περισσότερα αρχεία .txt από το πρόγραμμα HYPATIA για οπτικοποίηση της αναλλοίωτης μάζας.")
     st.stop()
 
 # Global event filter
 events = sorted({e for df in datasets.values() for e in df['event'].unique()})
 selected_events = st.sidebar.multiselect(
-    "Select event types to include",
+    "Επιλογή τύπου τελικής κατάστασης",
     options=events,
     default=events,
     format_func=lambda x: display_map.get(x, x)
@@ -228,34 +228,39 @@ def get_axis_bounds():
 
 x_min, x_max = get_axis_bounds()
 
+# use the scipy stats module to calculate RMS
+# def calculate_rms(series):
+#     return ((series**2).mean())**0.5  
+
 # Statistics table helper
 def stats_table(series):
     filtered = series[(series >= x_min) & (series <= x_max)]
+    print(f"Filtered series: {filtered}")
     return pd.DataFrame({
-        'Statistic': ['Count', 'Mean', 'Std', 'Min', 'Max'],
+        'Statistic': ['Αριθμός Γεγονότων', 'Μέσος όρος', 'Τυπική απόκλιση' ,'Ελάχιστο', 'Μέγιστο'],
         'Value': [
             int(filtered.count()),
-            filtered.mean(),
-            filtered.std(),
-            filtered.min(),
-            filtered.max()
+            f"{filtered.mean():.1f}",
+            f"{filtered.std():.1f}",
+            f"{filtered.min():.1f}",
+            f"{filtered.max():.1f}"
         ]
     })
 
 # Plot individual histograms with per-plot bin selector
 for name, df in datasets.items():
-    st.subheader(f"Histogram for {name}")
+    st.subheader(f"Iστόγραμμα από {name}")
     sel = df[df['event'].isin(selected_events)]['mass']
     col1, col2 = st.columns([3, 1])
     with col1:
         bins_ind = st.selectbox(
-            f"Bins for {name}",
+            f"Αριθμός Bin για {name}",
             options=bin_options,
             index=bin_options.index(50),
             key=f"bins_{name}"
         )
         show_counts = st.checkbox(
-            f"Show bin counts for {name}",
+            f"Εμφάνιση αριθμού γεγονότων σε κάθε bin για {name}",
             key=f"count_{name}"
         )
         # Base chart with dynamic binning and extent
@@ -269,15 +274,14 @@ for name, df in datasets.items():
             alt.Y(
                 'count()',
                 # y-title should be: "counts/"+str((x_max-x_min)/bins_ind),
-                title='Counts/'+ str((x_max-x_min)/bins_ind),
+                title='Γεγονότα/'+ str((x_max-x_min)/bins_ind)+' GeV',
                 axis=alt.Axis(grid=True)
-            )#,
-            # # the tooltip should provide the mass range with 1 decimal place and count with 1 decimal place
-            # tooltip=[
-            #     alt.Tooltip('mass:Q', bin=alt.Bin(maxbins=bins_ind, extent=[x_min, x_max]), format='.1f'),
-            #     alt.Tooltip('count()', format='.1f')
-            # ]
-            
+            ),
+            # the tooltip shows the mass range with 1 decimal place and count
+            tooltip=[
+                alt.Tooltip('mass:Q', bin=alt.Bin(maxbins=bins_ind, extent=[x_min, x_max]), title='Mass Range', format='.1f'),
+                alt.Tooltip('count()', title='Count')
+            ]
         )
         chart = base.mark_bar(opacity=0.7, color='#1f77b4').interactive()
         if show_counts:
@@ -294,18 +298,18 @@ for name, df in datasets.items():
         st.table(stats_table(sel))
 
 # Summed histogram with its own bin selector
-st.subheader("Summed Histogram of All Uploaded Files")
+st.subheader("Συνολικό ιστόγραμμα από όλα τα αρχεία")
 summed = all_masses
 col1, col2 = st.columns([3, 1])
 with col1:
     bins_sum = st.selectbox(
-        "Bins for Summed",
+        "Αριθμός Bin για Συνολικό Ιστόγραμμα",
         options=bin_options,
         index=bin_options.index(50),
         key="bins_summed"
     )
     show_sum = st.checkbox(
-        "Show bin counts for Summed",
+        "Εμφάνιση αριθμού γεγονότων σε κάθε bin",
         key="count_summed"
     )
     base_sum = alt.Chart(pd.DataFrame({'mass': summed})).encode(
@@ -318,7 +322,7 @@ with col1:
         alt.Y(
             'count()',
             # y-title should be: "counts/"+str((x_mass-x_min)/bins_sum),
-            title='Counts/'+ str((x_max-x_min)/bins_sum),
+            title='Γεγονότα/'+ str((x_max-x_min)/bins_sum),
             axis=alt.Axis(grid=True)
         )
     )
