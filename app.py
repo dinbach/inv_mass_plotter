@@ -1,3 +1,4 @@
+import math
 import os
 import numpy as np
 import streamlit as st
@@ -12,30 +13,39 @@ except ImportError:
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 data_dir = "uploads"
-skip_labels = {'4ee', '4em', '4mm'}
+# 4-lepton event labels: the row itself is KEPT (it carries the 4-lepton
+# invariant mass), but the 2 rows that follow it are SKIPPED because they
+# hold the individual lepton-pair masses and should not appear in the histogram.
+skip_labels = {'4ee', '4me', '4em', '4mm'}
+
+# Raw label → human-readable display name
 display_map = {
-    '4e':   '4e',
     'e':    'ee',
-    'g':    'γγ',
-    '4m':   '4μ',
     'm':    'μμ',
-    '2e2m': '2e2μ',
-    '4ee':  '4e',
-    '4em':  '2μ2e',
+    'g':    'γγ',
+    '4e':   '4e',    # some HYPATIA versions use short form
+    '4ee':  '4e',    # others use long form
+    '4m':   '4μ',
     '4mm':  '4μ',
+    '2e2m': '2e2μ',
+    '4me':  '2e2μ',  # 2μ + 2e mixed final state
+    '4em':  '2e2μ',  # same topology, different lepton ordering label
 }
+
+# Canonical display-name order for the sidebar filter (stable across uploads)
+DISPLAY_ORDER = ['ee', 'μμ', 'γγ', '4e', '4μ', '2e2μ']
 bin_options = [5, 10, 20, 50, 70, 100, 200, 400, 500]
+DELETE_PASSWORD = "hypatia2025"   # change this to your preferred password
 
 # Fixed colours for every possible display-name so the stacked comparison chart
 # keeps the same colour per channel regardless of which channels are selected.
 CHANNEL_COLORS = {
-    '4e':   '#1f77b4',   # blue
     'ee':   '#aec7e8',   # light blue
-    '4μ':   '#d62728',   # red
     'μμ':   '#ff9896',   # light red / pink
-    '2e2μ': '#2ca02c',   # green
-    '2μ2e': '#98df8a',   # light green
     'γγ':   '#ff7f0e',   # orange
+    '4e':   '#1f77b4',   # blue
+    '4μ':   '#d62728',   # red
+    '2e2μ': '#2ca02c',   # green
 }
 # col2: selectbox(~68) + 2×checkbox(~60) + 6-row table(~245) ≈ 373 px
 # col1: CHART_HEIGHT + range-inputs(~68) → 300 + 68 ≈ 368 px
@@ -61,6 +71,8 @@ def save_upload(uploaded_file):
 
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = 0
+if 'delete_pending' not in st.session_state:
+    st.session_state.delete_pending = False
 
 uploaded_files = st.sidebar.file_uploader(
     "Ανεβάστε ένα ή περισσότερα αρχεία (.txt)",
@@ -75,11 +87,30 @@ if uploaded_files:
 
 existing_files = [f for f in os.listdir(data_dir) if f.lower().endswith('.txt')]
 if existing_files:
-    if st.sidebar.button("Διαγραφή όλων των αρχείων", type="secondary"):
-        for f in existing_files:
-            os.remove(os.path.join(data_dir, f))
-        st.session_state.uploader_key += 1
-        st.rerun()
+    if not st.session_state.delete_pending:
+        # Normal state: show the delete button
+        if st.sidebar.button("Διαγραφή όλων των αρχείων", type="secondary"):
+            st.session_state.delete_pending = True
+            st.rerun()
+    else:
+        # Password-confirmation dialog
+        st.sidebar.warning("⚠️ Θα διαγραφούν όλα τα αρχεία!")
+        pwd = st.sidebar.text_input("🔑 Κωδικός:", type="password", key="delete_pwd")
+        if st.sidebar.button("✓ Επιβεβαίωση διαγραφής", type="primary", key="confirm_del"):
+            if pwd == DELETE_PASSWORD:
+                for f in existing_files:
+                    os.remove(os.path.join(data_dir, f))
+                st.session_state.delete_pending = False
+                st.session_state.uploader_key += 1
+                # clear the stored password from state
+                st.session_state.pop("delete_pwd", None)
+                st.rerun()
+            else:
+                st.sidebar.error("Λάθος κωδικός. Δοκιμάστε ξανά.")
+        if st.sidebar.button("✗ Ακύρωση", key="cancel_del"):
+            st.session_state.delete_pending = False
+            st.session_state.pop("delete_pwd", None)
+            st.rerun()
 
 # ── Load datasets ─────────────────────────────────────────────────────────────
 def load_datasets():
@@ -119,13 +150,26 @@ n_files = len(datasets)
 n_events_total = sum(len(df) for df in datasets.values())
 st.sidebar.caption(f"{n_files} αρχεί{'ο' if n_files == 1 else 'α'} · {n_events_total:,} γεγονότα φορτώθηκαν")
 
-events = sorted({e for df in datasets.values() for e in df['event'].unique()})
-selected_events = st.sidebar.multiselect(
+# Collect every raw event label that actually appears in the loaded data.
+_all_raw = {e for df in datasets.values() for e in df['event'].unique()}
+
+# Translate to display names and deduplicate while preserving canonical order.
+# Multiple raw labels can share the same display name (e.g. '4ee' and '4e'
+# both show as '4e'); the multiselect operates on display names so the user
+# sees a clean, non-redundant list.
+_present_displays = {display_map.get(e, e) for e in _all_raw}
+display_options   = [d for d in DISPLAY_ORDER if d in _present_displays] + \
+                    sorted(_present_displays - set(DISPLAY_ORDER))
+
+selected_displays = st.sidebar.multiselect(
     "Επιλογή τύπου τελικής κατάστασης",
-    options=events,
-    default=events,
-    format_func=lambda x: display_map.get(x, x)
+    options=display_options,
+    default=display_options,
 )
+
+# Map selected display names back to raw labels for all downstream filtering.
+selected_events = [raw for raw in _all_raw
+                   if display_map.get(raw, raw) in selected_displays]
 
 all_masses = pd.concat(
     [df[df['event'].isin(selected_events)]['mass'] for df in datasets.values()],
@@ -135,17 +179,34 @@ if all_masses.empty:
     st.warning("Δεν υπάρχουν γεγονότα για τα επιλεγμένα είδη τελικής κατάστασης. Επιλέξτε τουλάχιστον έναν τύπο.")
     st.stop()
 
-min_mass     = int(all_masses.min())
-max_mass     = int(all_masses.max())
+min_mass     = int(math.floor(all_masses.min()))
+max_mass     = int(math.ceil(all_masses.max()))   # ceil so the max value itself is never excluded
 default_xmax = min(max_mass, 2000)
 
-# ── Pre-clamp stale range keys ────────────────────────────────────────────────
-# When the user removes event types max_mass shrinks.  Any stored xmax value
-# that now exceeds max_mass would crash number_input(max_value=max_mass).
-# Deleting (not setting) the stale key here — before ANY widget is rendered —
-# makes the subsequent number_input fall back to its `value=` default.
-# (Streamlit forbids *setting* a widget-bound key after instantiation but
-#  deletion before instantiation is always safe.)
+# ── Initialise & clamp per-plot range keys ────────────────────────────────────
+# Two-step process, both steps run BEFORE any widget is instantiated so that
+# Streamlit's "cannot modify after instantiation" rule is never triggered.
+#
+# Step 1 – Seed defaults for keys that don't exist yet.
+#   Streamlit uses number_input's `value=` arg only when the key is ABSENT from
+#   session_state; if the key exists (even from a prior run with a stale value)
+#   `value=` is silently ignored.  Writing here guarantees a fresh session always
+#   starts at (0, min(max_mass, 2000)) regardless of what was stored before.
+_init_defaults = (
+    [("xmin_summed", 0), ("xmax_summed", default_xmax),
+     ("ov_xmin",     0), ("ov_xmax",     default_xmax)] +
+    [(f"xmin_{n}", 0)           for n in datasets] +
+    [(f"xmax_{n}", default_xmax) for n in datasets]
+)
+for _k, _v in _init_defaults:
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+# Step 2 – Delete keys whose stored value now exceeds max_mass.
+#   This happens when the user removes event types and max_mass shrinks; the
+#   stored value would crash number_input(max_value=max_mass).  Deletion (not
+#   re-assignment) is used because the value parameter in the subsequent widget
+#   call will then re-seed the key at the correct clamped value.
 _range_keys = (
     ["xmin_summed", "xmax_summed", "ov_xmin", "ov_xmax"] +
     [k for name in datasets for k in (f"xmin_{name}", f"xmax_{name}")]
@@ -288,7 +349,7 @@ def make_histogram_section(sel, bins_key, count_key, fit_key,
 
     with col2:
         bins_n      = st.selectbox("Αριθμός Bin", options=bin_options,
-                                   index=bin_options.index(50), key=bins_key)
+                                   index=bin_options.index(100), key=bins_key)
         show_counts = st.checkbox("Εμφάνιση counts", key=count_key)
         show_fit    = (st.checkbox("Γκαουσιανή προσαρμογή", key=fit_key)
                        if SCIPY_AVAILABLE else False)
@@ -383,7 +444,7 @@ with st.expander("Ανάλυση Παραθύρου Σήματος", expanded=Fa
         m4.metric("Ποσοστό στο παράθυρο", f"{pct:.1f}%")
 
         bins_sw = st.selectbox("Αριθμός Bin για εμφάνιση", options=bin_options,
-                               index=bin_options.index(50), key="bins_sw")
+                               index=bin_options.index(100), key="bins_sw")
 
         if not in_range.empty:
             bw_sw   = (sw_xmax - sw_xmin) / bins_sw
@@ -428,14 +489,12 @@ st.divider()
 with st.expander("Σύγκριση Καναλιών Διάσπασης", expanded=False):
     st.markdown(
         "Στοιβαγμένο ιστόγραμμα για όλα τα κανάλια διάσπασης. "
-        "Αποκαλύπτει **ισοτοπία λεπτονίων** (π.χ. Z→ee vs Z→μμ) και διαφορές μεταξύ "
-        "τοπολογιών όπως H→4e, H→4μ, H→2e2μ."
     )
 
     ov_col1, ov_col2 = st.columns(2)
     with ov_col1:
         bins_ov = st.selectbox("Αριθμός Bin", options=bin_options,
-                               index=bin_options.index(50), key="bins_overlay")
+                               index=bin_options.index(100), key="bins_overlay")
 
     ov_xmin, ov_xmax = _read_range("ov_xmin", "ov_xmax")
 
@@ -486,5 +545,26 @@ with st.expander("Σύγκριση Καναλιών Διάσπασης", expande
             ]
         ).interactive()
         st.altair_chart(stacked_chart.properties(height=350), use_container_width=True)
+
+        # ── Per-channel counts table ──────────────────────────────────────────
+        ch_counts = (
+            all_sel_df.groupby('channel', as_index=False)
+            .agg(Γεγονότα=('mass', 'count'))
+            .sort_values('Γεγονότα', ascending=False)
+            .reset_index(drop=True)
+        )
+        total_ch = int(ch_counts['Γεγονότα'].sum())
+        ch_counts['Ποσοστό (%)'] = (
+            ch_counts['Γεγονότα'] / total_ch * 100
+        ).round(1)
+        ch_counts = ch_counts.rename(columns={'channel': 'Κανάλι'})
+        # Totals row
+        totals_row = pd.DataFrame([{
+            'Κανάλι': 'Σύνολο', 'Γεγονότα': total_ch, 'Ποσοστό (%)': 100.0
+        }])
+        ch_counts = pd.concat([ch_counts, totals_row], ignore_index=True)
+
+        st.caption(f"Γεγονότα ανά κανάλι στο εύρος **{ov_xmin} – {ov_xmax} GeV**")
+        st.dataframe(ch_counts, hide_index=True, use_container_width=True)
     else:
         st.info("Δεν υπάρχουν αρκετά δεδομένα για σύγκριση καναλιών στο επιλεγμένο εύρος.")
