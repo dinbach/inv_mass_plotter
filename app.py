@@ -1,193 +1,109 @@
-# import os
-# import streamlit as st
-# import pandas as pd
-# import altair as alt
-
-# # Constants
-# data_dir = "uploads"
-# skip_labels = {'4ee', '4em', '4mm', '4me'}
-# display_map = {
-#     '4e': '4e',
-#     'e': 'ee',
-#     'g': 'γγ',
-#     '4m': '4μ',
-#     'm': 'μμ',
-#     '4em': '2e2μ',
-#     '4me': '2μ2e'
-# }
-
-# # Ensure upload directory exists
-# os.makedirs(data_dir, exist_ok=True)
-
-# # Streamlit setup
-# st.set_page_config(page_title="Invariant Mass Event Plotter", layout="wide")
-# st.title("Ιστογράμματα Αναλλοίωτης Μάζας")
-
-# # Sidebar controls
-# bin_options = [5, 10, 20, 50, 70, 100, 200, 400]
-# bins = st.sidebar.selectbox("Αριθμός bins", bin_options, index=bin_options.index(50))
-
-# # File uploader
-# def save_upload(uploaded_file):
-#     with open(os.path.join(data_dir, uploaded_file.name), 'wb') as f:
-#         f.write(uploaded_file.getbuffer())
-
-# uploaded_files = st.file_uploader(
-#     "Ανεβάστε ένα ή περισσότερα αρχεία (.txt)",
-#     type=['txt'], accept_multiple_files=True
-# )
-# if uploaded_files:
-#     for uf in uploaded_files:
-#         save_upload(uf)
-#         st.success(f"Saved {uf.name}")
-
-# # Load datasets from disk
-# def load_datasets():
-#     datasets = {}
-#     for fname in sorted(os.listdir(data_dir)):
-#         if not fname.lower().endswith('.txt'):
-#             continue
-#         path = os.path.join(data_dir, fname)
-#         try:
-#             df = pd.read_csv(path, sep=r"\s+", header=None, names=['mass', 'event'])
-#             # Skip logic
-#             mask = pd.Series(False, index=df.index)
-#             for idx, lbl in df['event'].items():
-#                 if lbl in skip_labels:
-#                     mask.loc[idx+1:idx+2] = True
-#             df = df.loc[~mask]
-#             datasets[fname] = df
-#         except Exception:
-#             continue
-#     return datasets
-
-# datasets = load_datasets()
-
-# if not datasets:
-#     st.info("Παρακαλώ ανεβάστε ένα ή περισσότερα αρχεία .txt από το πρόγραμμα HYPATIA για οπτικοποίηση της αναλλοίωτης μάζας.")
-#     st.stop()
-
-# # Event filter and axis bounds
-# all_events = sorted({e for df in datasets.values() for e in df['event'].unique()})
-# selected_events = st.sidebar.multiselect(
-#     "Επιλογή τύπου τελικής κατάστασης", options=all_events, default=all_events,
-#     format_func=lambda x: display_map.get(x, x)
-# )
-# all_masses = pd.concat([df[df['event'].isin(selected_events)]['mass'] for df in datasets.values()])
-# if all_masses.empty:
-#     st.info("Δεν υπάρχουν γεγονότα για τα επιλεγμένα είδη τελικής κατάστασης.")
-#     st.stop()
-# min_val, max_val = int(all_masses.min() - 100), int(all_masses.max() +100)
-# # min_val, max_val = 0, 2000
-# x_min = st.sidebar.number_input("Κατώτερο όριο X-άξονα", min_val, max_val, min_val)
-# x_max = st.sidebar.number_input("Ανώτερο όριο X-άξονα", min_val, max_val, max_val)
-
-# # Stats helper, display only 1 decimal place
-# def stats_table(series: pd.Series) -> pd.DataFrame:
-#     filtered = series[(series >= x_min) & (series <= x_max)]
-#     return pd.DataFrame({
-#         'Statistic': ['Count', 'Mean', 'Std', 'Min', 'Max'],
-#         'Value': [
-#             int(filtered.count()),
-#             f"{filtered.mean():.1f}",
-#             f"{filtered.std():.1f}",
-#             f"{filtered.min():.1f}",
-#             f"{filtered.max():.1f}"
-#         ]
-#     })
-
-# # Plot individual histograms
-# for name, df in datasets.items():
-#     sel = df[df['event'].isin(selected_events)]['mass']
-#     st.subheader(f"Ιστόγραμμα από {name}")
-#     col1, col2 = st.columns([3, 1])
-#     with col1:
-#         show_counts = st.checkbox(f"Show bin counts for {name}", key=name)
-#         base = alt.Chart(pd.DataFrame({'mass': sel})).encode(
-#             alt.X('mass:Q', bin=alt.Bin(maxbins=bins), scale=alt.Scale(domain=[x_min, x_max]), title='Invariant Mass', axis=alt.Axis(grid=True, ticks=True)),
-#             alt.Y('count()', title='Αριθμός Γεγονότων', axis=alt.Axis(grid=True))
-#         )
-#         chart = base.mark_bar(opacity=0.7, color='#1f77b4').interactive()
-#         if show_counts:
-#             text = base.mark_text(dy=-5, fontSize=10).encode(text='count()')
-#             chart = chart + text
-#         st.altair_chart(chart.properties(width=500, height=250), use_container_width=True)
-#     with col2:
-#         st.table(stats_table(sel))
-
-# # Summed histogram
-# summed = all_masses
-# st.subheader("Συνολικό ιστόγραμμα από όλα τα αρχεία")
-# col1, col2 = st.columns([3, 1])
-# with col1:
-#     show_sum = st.checkbox("Show bin counts for Summed", key="summed")
-#     base = alt.Chart(pd.DataFrame({'mass': summed})).encode(
-#         alt.X('mass:Q', bin=alt.Bin(maxbins=bins), scale=alt.Scale(domain=[x_min, x_max]), title='Invariant Mass', axis=alt.Axis(grid=True, ticks=True)),
-#         alt.Y('count()', title='Αριθμός Γεγονότων', axis=alt.Axis(grid=True))
-#     )
-#     chart = base.mark_bar(opacity=0.7, color='#d62728').interactive()
-#     if show_sum:
-#         text = base.mark_text(dy=-5, fontSize=10).encode(text='count()')
-#         chart = chart + text
-#     st.altair_chart(chart.properties(width=500, height=250), use_container_width=True)
-# with col2:
-#     st.table(stats_table(summed))
-    
-#V2
 import os
+import numpy as np
 import streamlit as st
 import pandas as pd
 import altair as alt
 
-# Constants
+try:
+    from scipy.optimize import curve_fit
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+
+# ── Constants ─────────────────────────────────────────────────────────────────
 data_dir = "uploads"
 skip_labels = {'4ee', '4em', '4mm'}
 display_map = {
-    '4e': '4e',
-    'e': 'ee',
-    'g': 'γγ',
-    '4m': '4μ',
-    'm': 'μμ',
-    '2e2m': '2e2μ'
+    '4e':   '4e',
+    'e':    'ee',
+    'g':    'γγ',
+    '4m':   '4μ',
+    'm':    'μμ',
+    '2e2m': '2e2μ',
+    '4ee':  '4e',
+    '4em':  '2μ2e',
+    '4mm':  '4μ',
 }
 bin_options = [5, 10, 20, 50, 70, 100, 200, 400, 500]
 
-# Ensure upload directory exists
+# Fixed colours for every possible display-name so the stacked comparison chart
+# keeps the same colour per channel regardless of which channels are selected.
+CHANNEL_COLORS = {
+    '4e':   '#1f77b4',   # blue
+    'ee':   '#aec7e8',   # light blue
+    '4μ':   '#d62728',   # red
+    'μμ':   '#ff9896',   # light red / pink
+    '2e2μ': '#2ca02c',   # green
+    '2μ2e': '#98df8a',   # light green
+    'γγ':   '#ff7f0e',   # orange
+}
+# col2: selectbox(~68) + 2×checkbox(~60) + 6-row table(~245) ≈ 373 px
+# col1: CHART_HEIGHT + range-inputs(~68) → 300 + 68 ≈ 368 px
+CHART_HEIGHT = 300
+
 os.makedirs(data_dir, exist_ok=True)
 
-# Streamlit setup
-st.set_page_config(page_title="Invariant Mass Event Plotter", layout="wide")
+# ── Page config ───────────────────────────────────────────────────────────────
+st.set_page_config(page_title="Invariant Mass Event Plotter", page_icon="⚛️", layout="wide")
 st.title("Ιστογράμματα Αναλλοίωτης Μάζας")
+st.markdown(
+    "Οπτικοποίηση δεδομένων αναλλοίωτης μάζας από το πρόγραμμα **HYPATIA**. "
+    "Ανεβάστε αρχεία `.txt` από την πλευρική μπάρα για να ξεκινήσετε."
+)
 
-# File uploader in sidebar
+# ── Sidebar: Αρχεία Δεδομένων ─────────────────────────────────────────────────
+st.sidebar.header("Αρχεία Δεδομένων")
+
 def save_upload(uploaded_file):
     path = os.path.join(data_dir, uploaded_file.name)
     with open(path, 'wb') as f:
         f.write(uploaded_file.getbuffer())
 
+if 'uploader_key' not in st.session_state:
+    st.session_state.uploader_key = 0
+
 uploaded_files = st.sidebar.file_uploader(
     "Ανεβάστε ένα ή περισσότερα αρχεία (.txt)",
     type=['txt'],
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    key=f"uploader_{st.session_state.uploader_key}"
 )
 if uploaded_files:
     for uf in uploaded_files:
         save_upload(uf)
-        st.sidebar.success(f"Saved {uf.name}")
+        st.sidebar.success(f"Αποθηκεύτηκε: {uf.name}")
 
-# Load datasets from disk
+existing_files = [f for f in os.listdir(data_dir) if f.lower().endswith('.txt')]
+if existing_files:
+    if st.sidebar.button("Διαγραφή όλων των αρχείων", type="secondary"):
+        for f in existing_files:
+            os.remove(os.path.join(data_dir, f))
+        st.session_state.uploader_key += 1
+        st.rerun()
+
+# ── Load datasets ─────────────────────────────────────────────────────────────
 def load_datasets():
     datasets = {}
     for fname in sorted(os.listdir(data_dir)):
         if not fname.lower().endswith('.txt'):
             continue
-        df = pd.read_csv(os.path.join(data_dir, fname), sep=r"\s+", header=None, names=['mass', 'event'])
-        # Skip two rows after specific labels
-        mask = pd.Series(False, index=df.index)
-        for idx, lbl in df['event'].items():
-            if lbl in skip_labels:
-                mask.loc[idx+1:idx+2] = True
-        datasets[fname] = df.loc[~mask]
+        path = os.path.join(data_dir, fname)
+        try:
+            df = pd.read_csv(path, sep=r"\s+", header=None, names=['mass', 'event'])
+            if df.empty:
+                st.sidebar.warning(f"{fname}: κενό αρχείο.")
+                continue
+            df['mass'] = pd.to_numeric(df['mass'], errors='coerce')
+            df = df.dropna(subset=['mass']).reset_index(drop=True)
+            mask = pd.Series(False, index=df.index)
+            for pos, lbl in enumerate(df['event']):
+                if lbl in skip_labels:
+                    for offset in [1, 2]:
+                        if pos + offset < len(df):
+                            mask.iloc[pos + offset] = True
+            datasets[fname] = df.loc[~mask].reset_index(drop=True)
+        except Exception as e:
+            st.sidebar.warning(f"Αδυναμία φόρτωσης {fname}: {e}")
     return datasets
 
 datasets = load_datasets()
@@ -195,7 +111,14 @@ if not datasets:
     st.info("Παρακαλώ ανεβάστε ένα ή περισσότερα αρχεία .txt από το πρόγραμμα HYPATIA για οπτικοποίηση της αναλλοίωτης μάζας.")
     st.stop()
 
-# Global event filter
+# ── Sidebar: Φίλτρα ───────────────────────────────────────────────────────────
+st.sidebar.divider()
+st.sidebar.header("Φίλτρα")
+
+n_files = len(datasets)
+n_events_total = sum(len(df) for df in datasets.values())
+st.sidebar.caption(f"{n_files} αρχεί{'ο' if n_files == 1 else 'α'} · {n_events_total:,} γεγονότα φορτώθηκαν")
+
 events = sorted({e for df in datasets.values() for e in df['event'].unique()})
 selected_events = st.sidebar.multiselect(
     "Επιλογή τύπου τελικής κατάστασης",
@@ -204,138 +127,364 @@ selected_events = st.sidebar.multiselect(
     format_func=lambda x: display_map.get(x, x)
 )
 
-# Combine masses for axis bounds
-all_masses = pd.concat([
-    df[df['event'].isin(selected_events)]['mass'] for df in datasets.values()
-])
-min_mass, max_mass = int(all_masses.min()), int(all_masses.max())
+all_masses = pd.concat(
+    [df[df['event'].isin(selected_events)]['mass'] for df in datasets.values()],
+    ignore_index=True
+)
+if all_masses.empty:
+    st.warning("Δεν υπάρχουν γεγονότα για τα επιλεγμένα είδη τελικής κατάστασης. Επιλέξτε τουλάχιστον έναν τύπο.")
+    st.stop()
 
-# X-axis bounds inputs
-def get_axis_bounds():
-    x_min = st.sidebar.number_input(
-        "X-axis min",
-        min_value=0,
-        max_value=max_mass,
-        value=0
-    )
-    x_max = st.sidebar.number_input(
-        "X-axis max",
-        min_value=0,
-        max_value=max_mass,
-        value=min(max_mass, 2000)
-    )
-    return x_min, x_max
+min_mass     = int(all_masses.min())
+max_mass     = int(all_masses.max())
+default_xmax = min(max_mass, 2000)
 
-x_min, x_max = get_axis_bounds()
+# ── Pre-clamp stale range keys ────────────────────────────────────────────────
+# When the user removes event types max_mass shrinks.  Any stored xmax value
+# that now exceeds max_mass would crash number_input(max_value=max_mass).
+# Deleting (not setting) the stale key here — before ANY widget is rendered —
+# makes the subsequent number_input fall back to its `value=` default.
+# (Streamlit forbids *setting* a widget-bound key after instantiation but
+#  deletion before instantiation is always safe.)
+_range_keys = (
+    ["xmin_summed", "xmax_summed", "ov_xmin", "ov_xmax"] +
+    [k for name in datasets for k in (f"xmin_{name}", f"xmax_{name}")]
+)
+for _k in _range_keys:
+    if _k in st.session_state:
+        try:
+            if int(st.session_state[_k]) > max_mass:
+                del st.session_state[_k]
+        except (ValueError, TypeError):
+            del st.session_state[_k]
 
-# use the scipy stats module to calculate RMS
-# def calculate_rms(series):
-#     return ((series**2).mean())**0.5  
+# ── Helper functions ──────────────────────────────────────────────────────────
+def gaussian(x, amplitude, mean, sigma):
+    return amplitude * np.exp(-0.5 * ((x - mean) / sigma) ** 2)
 
-# Statistics table helper
-def stats_table(series):
+
+def stats_table(series, x_min, x_max, fit_mean=None, fit_sigma=None):
     filtered = series[(series >= x_min) & (series <= x_max)]
-    print(f"Filtered series: {filtered}")
-    return pd.DataFrame({
-        'Statistic': ['Αριθμός Γεγονότων', 'Μέσος όρος', 'Τυπική απόκλιση' ,'Ελάχιστο', 'Μέγιστο'],
-        'Value': [
-            int(filtered.count()),
-            f"{filtered.mean():.1f}",
-            f"{filtered.std():.1f}",
-            f"{filtered.min():.1f}",
-            f"{filtered.max():.1f}"
+    empty = filtered.empty
+    rows = [
+        ('Εύρος ανάλυσης',    f"{x_min} – {x_max} GeV"),
+        ('Αριθμός Γεγονότων', '0' if empty else int(filtered.count())),
+        ('Μέσος όρος',        '—' if empty else f"{filtered.mean():.2f} GeV"),
+        ('Τυπική απόκλιση',   '—' if empty else f"{filtered.std():.2f} GeV"),
+        ('Ελάχιστο',          '—' if empty else f"{filtered.min():.1f} GeV"),
+        ('Μέγιστο',           '—' if empty else f"{filtered.max():.1f} GeV"),
+    ]
+    if fit_mean is not None:
+        rows += [
+            ('Προσ. μέση τιμή',  f"{fit_mean:.2f} GeV"),
+            ('Προσ. σ (πλάτος)', f"{abs(fit_sigma):.2f} GeV"),
         ]
-    })
+    return pd.DataFrame(rows, columns=['Στατιστικό', 'Τιμή'])
 
-# Plot individual histograms with per-plot bin selector
-for name, df in datasets.items():
-    st.subheader(f"Iστόγραμμα από {name}")
-    sel = df[df['event'].isin(selected_events)]['mass']
+
+def build_chart(sel, bins_n, color, show_counts, show_fit, x_min, x_max):
+    """Histogram using Altair's native bin+count() — guaranteed to render bars.
+
+    Gaussian fit and count labels are overlaid as separate layers using numpy
+    bins (same step, so bin centers align with the bars).
+    resolve_scale(y='shared') ensures all layers share one Y axis.
+    """
+    data = sel[(sel >= x_min) & (sel <= x_max)]
+    bin_width   = (x_max - x_min) / bins_n
+    width_label = str(int(bin_width)) if bin_width == int(bin_width) else f"{bin_width:.1f}"
+    # Use same step in Altair and numpy so bin edges are identical
+    abin = alt.Bin(step=bin_width, extent=[x_min, x_max])
+
+    # Numpy histogram (needed for labels & fit; bins match Altair's)
+    if not data.empty:
+        counts, bin_edges = np.histogram(data, bins=bins_n, range=(x_min, x_max))
+    else:
+        counts    = np.zeros(bins_n, dtype=int)
+        bin_edges = np.linspace(x_min, x_max, bins_n + 1)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    # ── Bar chart via Altair's count() – this is the approach that reliably renders
+    bars = alt.Chart(pd.DataFrame({'mass': data})).mark_bar(
+        opacity=0.7, color=color
+    ).encode(
+        alt.X('mass:Q', bin=abin, title='Αναλλοίωτη Μάζα (GeV)',
+              axis=alt.Axis(grid=True, ticks=True)),
+        alt.Y('count()', title=f'Γεγονότα/{width_label} GeV',
+              axis=alt.Axis(grid=True)),
+        tooltip=[
+            alt.Tooltip('mass:Q', bin=abin, title='Εύρος Μάζας', format='.1f'),
+            alt.Tooltip('count()', title='Γεγονότα'),
+        ]
+    )
+
+    extra_layers = []   # layers that use count:Q (shared scale with bars)
+    fit_mean = fit_sigma = None
+
+    if show_counts and not data.empty:
+        # Use 'mass' as the X field so this layer shares the same X scale as
+        # the bar layer (which also uses mass:Q). A different field name would
+        # force Altair to merge two independent X scales, distorting the axis.
+        hist_df = pd.DataFrame({'mass': bin_centers, 'count': counts})
+        labels  = alt.Chart(hist_df[hist_df['count'] > 0]).mark_text(
+            dy=-7, fontSize=10
+        ).encode(
+            x=alt.X('mass:Q'),
+            y=alt.Y('count:Q'),
+            text=alt.Text('count:Q'),
+        )
+        extra_layers.append(labels)
+
+    if show_fit and SCIPY_AVAILABLE and not data.empty and len(data) >= 5:
+        nonzero = counts > 0
+        if nonzero.sum() >= 3:
+            try:
+                p0 = [float(counts.max()), float(data.mean()),
+                      max(float(data.std()), 0.1)]
+                popt, _ = curve_fit(
+                    gaussian, bin_centers[nonzero], counts[nonzero].astype(float),
+                    p0=p0, maxfev=5000
+                )
+                fit_mean  = float(popt[1])
+                fit_sigma = float(popt[2])
+                x_fit = np.linspace(x_min, x_max, 500)
+                y_fit = gaussian(x_fit, *popt)
+                fit_color = '#d62728' if color != '#d62728' else '#ff7f0e'
+                # Both X and Y field names match the bar layer ('mass', 'count')
+                # so all three layers resolve to the same axes without distortion.
+                fit_curve = alt.Chart(
+                    pd.DataFrame({'mass': x_fit, 'count': y_fit})
+                ).mark_line(color=fit_color, strokeWidth=2.5).encode(
+                    x=alt.X('mass:Q'),
+                    y=alt.Y('count:Q'),
+                )
+                extra_layers.append(fit_curve)
+            except Exception:
+                pass
+
+    if extra_layers:
+        chart = alt.layer(bars, *extra_layers).resolve_scale(y='shared')
+    else:
+        chart = bars
+
+    return chart.interactive(), fit_mean, fit_sigma
+
+
+def _read_range(xmin_key, xmax_key):
+    """Read per-plot range from session state (keys were pre-clamped above).
+    Pure read — never writes to session_state, so safe to call at any point."""
+    xmin = max(0, min(int(st.session_state.get(xmin_key, 0)), max_mass))
+    xmax = max(0, min(int(st.session_state.get(xmax_key, default_xmax)), max_mass))
+    if xmin >= xmax:
+        xmin, xmax = 0, min(default_xmax, max_mass)
+    return xmin, xmax
+
+
+def make_histogram_section(sel, bins_key, count_key, fit_key,
+                            xmin_key, xmax_key, color):
+    """Render histogram block.  Range inputs live below the chart in col1."""
+    plot_xmin, plot_xmax = _read_range(xmin_key, xmax_key)
+
     col1, col2 = st.columns([3, 1])
-    with col1:
-        bins_ind = st.selectbox(
-            f"Αριθμός Bin για {name}",
-            options=bin_options,
-            index=bin_options.index(50),
-            key=f"bins_{name}"
-        )
-        show_counts = st.checkbox(
-            f"Εμφάνιση αριθμού γεγονότων σε κάθε bin για {name}",
-            key=f"count_{name}"
-        )
-        # Base chart with dynamic binning and extent
-        base = alt.Chart(pd.DataFrame({'mass': sel})).encode(
-            alt.X(
-                'mass:Q',
-                bin=alt.Bin(maxbins=bins_ind, extent=[x_min, x_max]),
-                title='Invariant Mass',
-                axis=alt.Axis(grid=True, ticks=True)
-            ),
-            alt.Y(
-                'count()',
-                # y-title should be: "counts/"+str((x_max-x_min)/bins_ind),
-                title='Γεγονότα/'+ str((x_max-x_min)/bins_ind)+' GeV',
-                axis=alt.Axis(grid=True)
-            ),
-            # the tooltip shows the mass range with 1 decimal place and count
-            tooltip=[
-                alt.Tooltip('mass:Q', bin=alt.Bin(maxbins=bins_ind, extent=[x_min, x_max]), title='Mass Range', format='.1f'),
-                alt.Tooltip('count()', title='Count')
-            ]
-        )
-        chart = base.mark_bar(opacity=0.7, color='#1f77b4').interactive()
-        if show_counts:
-            text = alt.Chart(pd.DataFrame({'mass': sel})).mark_text(dy=-5, fontSize=10).encode(
-                alt.X(
-                    'mass:Q',
-                    bin=alt.Bin(maxbins=bins_ind, extent=[x_min, x_max])
-                ),
-                text='count()'
-            )
-            chart = chart + text
-        st.altair_chart(chart.properties(width=500, height=250), use_container_width=True)
-    with col2:
-        st.table(stats_table(sel))
 
-# Summed histogram with its own bin selector
-st.subheader("Συνολικό ιστόγραμμα από όλα τα αρχεία")
-summed = all_masses
-col1, col2 = st.columns([3, 1])
-with col1:
-    bins_sum = st.selectbox(
-        "Αριθμός Bin για Συνολικό Ιστόγραμμα",
-        options=bin_options,
-        index=bin_options.index(50),
-        key="bins_summed"
-    )
-    show_sum = st.checkbox(
-        "Εμφάνιση αριθμού γεγονότων σε κάθε bin",
-        key="count_summed"
-    )
-    base_sum = alt.Chart(pd.DataFrame({'mass': summed})).encode(
-        alt.X(
-            'mass:Q',
-            bin=alt.Bin(maxbins=bins_sum, extent=[x_min, x_max]),
-            title='Invariant Mass',
-            axis=alt.Axis(grid=True, ticks=True)
-        ),
-        alt.Y(
-            'count()',
-            # y-title should be: "counts/"+str((x_mass-x_min)/bins_sum),
-            title='Γεγονότα/'+ str((x_max-x_min)/bins_sum),
-            axis=alt.Axis(grid=True)
+    with col2:
+        bins_n      = st.selectbox("Αριθμός Bin", options=bin_options,
+                                   index=bin_options.index(50), key=bins_key)
+        show_counts = st.checkbox("Εμφάνιση counts", key=count_key)
+        show_fit    = (st.checkbox("Γκαουσιανή προσαρμογή", key=fit_key)
+                       if SCIPY_AVAILABLE else False)
+        stats_slot  = st.empty()   # filled after build_chart returns fit results
+
+    with col1:
+        if sel[(sel >= plot_xmin) & (sel <= plot_xmax)].empty:
+            st.info("Δεν υπάρχουν δεδομένα στο επιλεγμένο εύρος.")
+        chart, fit_mean, fit_sigma = build_chart(
+            sel, bins_n, color, show_counts, show_fit, plot_xmin, plot_xmax
         )
+        st.altair_chart(chart.properties(height=CHART_HEIGHT), use_container_width=True)
+        # Range inputs directly below the x-axis
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            st.number_input("X min (GeV)", min_value=0, max_value=max_mass,
+                            value=plot_xmin, key=xmin_key)
+        with rc2:
+            st.number_input("X max (GeV)", min_value=0, max_value=max_mass,
+                            value=plot_xmax, key=xmax_key)
+
+    stats_slot.dataframe(
+        stats_table(sel, plot_xmin, plot_xmax,
+                    fit_mean if show_fit else None,
+                    fit_sigma if show_fit else None),
+        hide_index=True, use_container_width=True
     )
-    chart_sum = base_sum.mark_bar(opacity=0.7, color='#d62728').interactive()
-    if show_sum:
-        text_sum = alt.Chart(pd.DataFrame({'mass': summed})).mark_text(dy=-5, fontSize=10).encode(
-            alt.X(
-                'mass:Q',
-                bin=alt.Bin(maxbins=bins_sum, extent=[x_min, x_max])
-            ),
-            text='count()'
-        )
-        chart_sum = chart_sum + text_sum
-    st.altair_chart(chart_sum.properties(width=500, height=250), use_container_width=True)
-with col2:
-    st.table(stats_table(summed))
+
+
+# ── Individual histograms ─────────────────────────────────────────────────────
+for name, df in datasets.items():
+    display_name = os.path.splitext(name)[0]
+    st.subheader(f"Ιστόγραμμα — {display_name}")
+    sel = df[df['event'].isin(selected_events)]['mass']
+    make_histogram_section(sel,
+                           bins_key=f"bins_{name}",
+                           count_key=f"count_{name}",
+                           fit_key=f"fit_{name}",
+                           xmin_key=f"xmin_{name}",
+                           xmax_key=f"xmax_{name}",
+                           color='#1f77b4')
+    st.divider()
+
+# ── Summed histogram ──────────────────────────────────────────────────────────
+st.subheader(f"Συνολικό ιστόγραμμα ({len(datasets)} αρχεία)")
+make_histogram_section(all_masses,
+                       bins_key="bins_summed",
+                       count_key="count_summed",
+                       fit_key="fit_summed",
+                       xmin_key="xmin_summed",
+                       xmax_key="xmax_summed",
+                       color='#d62728')
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Feature 1 – Signal window analysis
+# ════════════════════════════════════════════════════════════════════════════════
+st.divider()
+with st.expander("Ανάλυση Παραθύρου Σήματος", expanded=False):
+    st.markdown(
+        "Ορίστε ένα εύρος μάζας (**παράθυρο σήματος**) και μετρήστε τα γεγονότα μέσα σε αυτό. "
+        "Χρήσιμο για εκτίμηση της απόδοσης ενός σωματιδίου (π.χ. Z, J/ψ, Higgs) ή "
+        "υπολογισμό λόγου σήματος/υποβάθρου."
+    )
+
+    sw_xmin, sw_xmax = _read_range("xmin_summed", "xmax_summed")
+
+    sw_col1, sw_col2 = st.columns(2)
+    default_lo = round(sw_xmin + (sw_xmax - sw_xmin) * 0.4, 1)
+    default_hi = round(sw_xmin + (sw_xmax - sw_xmin) * 0.6, 1)
+    with sw_col1:
+        sig_min = st.number_input("Κάτω όριο παραθύρου (GeV)",
+                                  min_value=float(sw_xmin), max_value=float(sw_xmax),
+                                  value=default_lo, step=0.5, key="sig_min")
+    with sw_col2:
+        sig_max = st.number_input("Άνω όριο παραθύρου (GeV)",
+                                  min_value=float(sw_xmin), max_value=float(sw_xmax),
+                                  value=default_hi, step=0.5, key="sig_max")
+
+    if sig_min >= sig_max:
+        st.warning("Το κάτω όριο πρέπει να είναι μικρότερο από το άνω.")
+    else:
+        in_range = all_masses[(all_masses >= sw_xmin) & (all_masses <= sw_xmax)]
+        n_total  = len(in_range)
+        n_sig    = int(((all_masses >= sig_min) & (all_masses <= sig_max)).sum())
+        n_out    = n_total - n_sig
+        pct      = (n_sig / n_total * 100) if n_total > 0 else 0.0
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Σύνολο (εύρος ανάλυσης)", n_total)
+        m2.metric("Εντός παραθύρου", n_sig)
+        m3.metric("Εκτός παραθύρου", n_out)
+        m4.metric("Ποσοστό στο παράθυρο", f"{pct:.1f}%")
+
+        bins_sw = st.selectbox("Αριθμός Bin για εμφάνιση", options=bin_options,
+                               index=bin_options.index(50), key="bins_sw")
+
+        if not in_range.empty:
+            bw_sw   = (sw_xmax - sw_xmin) / bins_sw
+            abin_sw = alt.Bin(step=bw_sw, extent=[sw_xmin, sw_xmax])
+
+            # Tag each mass value as inside or outside the signal window
+            sw_df = pd.DataFrame({'mass': in_range})
+            sw_df['παράθυρο'] = np.where(
+                (sw_df['mass'] >= sig_min) & (sw_df['mass'] <= sig_max),
+                'Εντός', 'Εκτός'
+            )
+
+            sw_bars = alt.Chart(sw_df).mark_bar(opacity=0.75).encode(
+                alt.X('mass:Q', bin=abin_sw, title='Αναλλοίωτη Μάζα (GeV)',
+                      axis=alt.Axis(grid=True, ticks=True)),
+                alt.Y('count()', stack='zero', title='Γεγονότα',
+                      axis=alt.Axis(grid=True)),
+                alt.Color('παράθυρο:N',
+                          scale=alt.Scale(domain=['Εντός', 'Εκτός'],
+                                          range=['#d62728', '#aec7e8']),
+                          legend=alt.Legend(title='Παράθυρο')),
+                tooltip=[
+                    alt.Tooltip('mass:Q', bin=abin_sw, title='Εύρος', format='.1f'),
+                    alt.Tooltip('count()', title='Γεγονότα'),
+                    alt.Tooltip('παράθυρο:N', title='Κατηγορία'),
+                ]
+            )
+            rule_lo = alt.Chart(pd.DataFrame({'x': [sig_min]})).mark_rule(
+                color='red', strokeDash=[5, 3], strokeWidth=2).encode(x='x:Q')
+            rule_hi = alt.Chart(pd.DataFrame({'x': [sig_max]})).mark_rule(
+                color='red', strokeDash=[5, 3], strokeWidth=2).encode(x='x:Q')
+
+            st.altair_chart(
+                (sw_bars + rule_lo + rule_hi).interactive().properties(height=280),
+                use_container_width=True
+            )
+
+# ════════════════════════════════════════════════════════════════════════════════
+# Feature 2 – Channel comparison (stacked bar histogram)
+# ════════════════════════════════════════════════════════════════════════════════
+st.divider()
+with st.expander("Σύγκριση Καναλιών Διάσπασης", expanded=False):
+    st.markdown(
+        "Στοιβαγμένο ιστόγραμμα για όλα τα κανάλια διάσπασης. "
+        "Αποκαλύπτει **ισοτοπία λεπτονίων** (π.χ. Z→ee vs Z→μμ) και διαφορές μεταξύ "
+        "τοπολογιών όπως H→4e, H→4μ, H→2e2μ."
+    )
+
+    ov_col1, ov_col2 = st.columns(2)
+    with ov_col1:
+        bins_ov = st.selectbox("Αριθμός Bin", options=bin_options,
+                               index=bin_options.index(50), key="bins_overlay")
+
+    ov_xmin, ov_xmax = _read_range("ov_xmin", "ov_xmax")
+
+    ov_rc1, ov_rc2 = st.columns(2)
+    with ov_rc1:
+        st.number_input("X min (GeV)", min_value=0, max_value=max_mass,
+                        value=ov_xmin, key="ov_xmin")
+    with ov_rc2:
+        st.number_input("X max (GeV)", min_value=0, max_value=max_mass,
+                        value=ov_xmax, key="ov_xmax")
+
+    # Build combined DataFrame with 'mass' and 'channel' columns
+    all_sel_df = pd.concat(
+        [df[df['event'].isin(selected_events)][['mass', 'event']]
+         for df in datasets.values()],
+        ignore_index=True
+    )
+    all_sel_df['channel'] = all_sel_df['event'].map(lambda x: display_map.get(x, x))
+    all_sel_df = all_sel_df[
+        (all_sel_df['mass'] >= ov_xmin) & (all_sel_df['mass'] <= ov_xmax)
+    ]
+
+    if not all_sel_df.empty:
+        bw_ov   = (ov_xmax - ov_xmin) / bins_ov
+        abin_ov = alt.Bin(step=bw_ov, extent=[ov_xmin, ov_xmax])
+
+        # Build a scale whose domain contains ONLY the channels present in the
+        # current data (so the legend shows only those), but colours are looked
+        # up from the fixed CHANNEL_COLORS map so they never shift.
+        _present   = [ch for ch in CHANNEL_COLORS
+                      if ch in all_sel_df['channel'].unique()]
+        _ch_domain = _present
+        _ch_range  = [CHANNEL_COLORS[ch] for ch in _present]
+
+        # Altair stacks count() per (bin, channel) automatically with stack='zero'
+        stacked_chart = alt.Chart(all_sel_df).mark_bar(opacity=0.8).encode(
+            alt.X('mass:Q', bin=abin_ov, title='Αναλλοίωτη Μάζα (GeV)',
+                  axis=alt.Axis(grid=True, ticks=True)),
+            alt.Y('count()', stack='zero', title='Γεγονότα',
+                  axis=alt.Axis(grid=True)),
+            alt.Color('channel:N',
+                      scale=alt.Scale(domain=_ch_domain, range=_ch_range),
+                      legend=alt.Legend(title='Κανάλι')),
+            tooltip=[
+                alt.Tooltip('channel:N',  title='Κανάλι'),
+                alt.Tooltip('mass:Q', bin=abin_ov, title='Εύρος Μάζας', format='.1f'),
+                alt.Tooltip('count()',    title='Γεγονότα'),
+            ]
+        ).interactive()
+        st.altair_chart(stacked_chart.properties(height=350), use_container_width=True)
+    else:
+        st.info("Δεν υπάρχουν αρκετά δεδομένα για σύγκριση καναλιών στο επιλεγμένο εύρος.")
