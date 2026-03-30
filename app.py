@@ -36,6 +36,9 @@ display_map = {
 DISPLAY_ORDER = ['ee', 'μμ', 'γγ', '4e', '4μ', '2e2μ']
 bin_options = [5, 10, 20, 50, 70, 100, 200, 400, 500]
 DELETE_PASSWORD = "hypatia2025"   # change this to your preferred password
+# Files whose stem matches this name are shown only as individual plots and are
+# excluded from the summed histogram and all expander analyses.
+CLASS_FILENAME = "Class2025"
 
 # Fixed colours for every possible display-name so the stacked comparison chart
 # keeps the same colour per channel regardless of which channels are selected.
@@ -172,7 +175,9 @@ selected_events = [raw for raw in _all_raw
                    if display_map.get(raw, raw) in selected_displays]
 
 all_masses = pd.concat(
-    [df[df['event'].isin(selected_events)]['mass'] for df in datasets.values()],
+    [df[df['event'].isin(selected_events)]['mass']
+     for name, df in datasets.items()
+     if os.path.splitext(name)[0] != CLASS_FILENAME],
     ignore_index=True
 )
 if all_masses.empty:
@@ -515,9 +520,11 @@ with st.expander("Σύγκριση Καναλιών Διάσπασης", expande
                         value=ov_xmax, key="ov_xmax")
 
     # Build combined DataFrame with 'mass' and 'channel' columns
+    # (Class2025 file excluded from combined analyses)
     all_sel_df = pd.concat(
         [df[df['event'].isin(selected_events)][['mass', 'event']]
-         for df in datasets.values()],
+         for name, df in datasets.items()
+         if os.path.splitext(name)[0] != CLASS_FILENAME],
         ignore_index=True
     )
     all_sel_df['channel'] = all_sel_df['event'].map(lambda x: display_map.get(x, x))
