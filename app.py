@@ -194,6 +194,7 @@ default_xmax = min(max_mass, 2000)
 #   starts at (0, min(max_mass, 2000)) regardless of what was stored before.
 _init_defaults = (
     [("xmin_summed", 0), ("xmax_summed", default_xmax),
+     ("sw_xmin",     0), ("sw_xmax",     default_xmax),
      ("ov_xmin",     0), ("ov_xmax",     default_xmax)] +
     [(f"xmin_{n}", 0)           for n in datasets] +
     [(f"xmax_{n}", default_xmax) for n in datasets]
@@ -203,12 +204,8 @@ for _k, _v in _init_defaults:
         st.session_state[_k] = _v
 
 # Step 2 – Delete keys whose stored value now exceeds max_mass.
-#   This happens when the user removes event types and max_mass shrinks; the
-#   stored value would crash number_input(max_value=max_mass).  Deletion (not
-#   re-assignment) is used because the value parameter in the subsequent widget
-#   call will then re-seed the key at the correct clamped value.
 _range_keys = (
-    ["xmin_summed", "xmax_summed", "ov_xmin", "ov_xmax"] +
+    ["xmin_summed", "xmax_summed", "sw_xmin", "sw_xmax", "ov_xmin", "ov_xmax"] +
     [k for name in datasets for k in (f"xmin_{name}", f"xmax_{name}")]
 )
 for _k in _range_keys:
@@ -414,7 +411,18 @@ with st.expander("Ανάλυση Παραθύρου Σήματος", expanded=Fa
         "υπολογισμό λόγου σήματος/υποβάθρου."
     )
 
-    sw_xmin, sw_xmax = _read_range("xmin_summed", "xmax_summed")
+    sw_xmin, sw_xmax = _read_range("sw_xmin", "sw_xmax")
+
+    # Independent x-axis range for this expander
+    ax_col1, ax_col2 = st.columns(2)
+    with ax_col1:
+        st.number_input("X min ανάλυσης (GeV)", min_value=0, max_value=max_mass,
+                        value=sw_xmin, key="sw_xmin")
+    with ax_col2:
+        st.number_input("X max ανάλυσης (GeV)", min_value=0, max_value=max_mass,
+                        value=sw_xmax, key="sw_xmax")
+
+    st.divider()
 
     sw_col1, sw_col2 = st.columns(2)
     default_lo = round(sw_xmin + (sw_xmax - sw_xmin) * 0.4, 1)
